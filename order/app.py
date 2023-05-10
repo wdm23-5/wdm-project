@@ -149,4 +149,6 @@ def checkout(order_id):
     if not success:
         return Response(status=HTTPStatus.NOT_FOUND)
 
+    # todo: update (order_id, paid)
+
     return Response(status=HTTPStatus.OK)
