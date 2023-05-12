@@ -33,9 +33,15 @@ def create_item(price: int):
     # todo: add or update (item_id, price)
     #  auto incr item_id by 1 
     item_id = db.incr('item_id')
-    item = {'item_id': item_id, 'stock': 0, 'price': price}
-    db.hset(f'item:{item_id}', mapping=item)
+    # item = {'item_id': item_id, 'stock': 0, 'price': price}
+    # db.hset(f'item:{item_id}', mapping=item)  
     
+    # price_map = dict()
+    # price_map[item_id] = price
+    
+    db.hset('price', f'item{item_id}', price)
+    db.hset('stock', f'item{item_id}', 0)
+      
     response = Response(
         response=json.dumps({'item_id': item_id}),
         status=HTTPStatus.OK,
@@ -49,14 +55,18 @@ def find_item(item_id: str):
     # todo: select (item_id, price)
     # value = db.exists(f'item:{item_id}')
     # print('value', value, flush=True)
-    if db.exists(f'item:{item_id}'):
-        value = db.exists(f'item:{item_id}')
-        item = db.hmget(f'item:{item_id}', 'stock', 'price')
-        # print('item', item, flush=True)
-        stock, price = int(item[0]), int(item[1])
-        # print('stock, price', stock, price, flush=True)
-    else:
-        return Response(status=HTTPStatus.NOT_FOUND)
+    
+    print('hget', db.hget('stock', f'item{item_id}'), flush=True)
+    stock = db.hget('stock', f'item{item_id}')
+    if stock is None: 
+            raise NotImplementedError
+    stock = int(stock)
+
+    price = db.hget('price', f'item{item_id}')
+    if price is None: 
+            raise NotImplementedError
+    price = int(price)
+    print('stock, price', stock, price, flush=True)
     response = Response(
         response=json.dumps({
             'stock': stock,
@@ -71,7 +81,7 @@ def find_item(item_id: str):
 @app.post('/add/<item_id>/<amount>')
 def add_stock(item_id: str, amount: int):
     # todo: select (item_id, stock)
-    db.hincrby(f'item:{item_id}', 'stock', amount)
+    db.hincrby('stock', f'item{item_id}', amount)
     # success = True
     # if not success:
     #     return Response(status=HTTPStatus.NOT_FOUND)
@@ -82,27 +92,20 @@ def add_stock(item_id: str, amount: int):
 @app.post('/subtract/<item_id>/<amount>')
 def remove_stock(item_id: str, amount: int):
     # todo: call /add/<item_id>/-<amount>
-    stock = int(db.hget(f'item:{item_id}', 'stock'))
+    stock = int(db.hget('stock', f'item{item_id}'))
     # print('stock', stock,  flush=True)
     if stock < int(amount):
         return Response(status=HTTPStatus.NOT_FOUND) 
     else:
-         db.hincrby(f'item:{item_id}', 'stock', -int(amount))
-         stock = int(db.hget(f'item:{item_id}', 'stock'))
+         db.hincrby('stock', f'item{item_id}', -int(amount))
+        #  stock = int(db.hget(f'item:{item_id}', 'stock'))
         #  print('stock1', stock,  flush=True)
          return Response(status=HTTPStatus.OK)
  
     
-# delete item 
-# @app.get('/delete/<item_id>')
-# def delete_item(item_id: str):
-#     # Check if item_id exists in the database
-#     if db.exists(f'item:{item_id}'):
-#         # Delete the item_id from the database
-#         db.delete(f'item:{item_id}')
-#         return {'message': f'Item {item_id} deleted'}
-#     else:
-#         return {'error': 'Item not found'}
-
+# delete 
+@app.get('/deletedb')
+def delete_db(item_id: str):
+    db.flushall()
 
 
