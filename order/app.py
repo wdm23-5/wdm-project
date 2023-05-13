@@ -77,6 +77,15 @@ def remove_order(order_id):
 
     return Response(status=HTTPStatus.OK)
 
+# async def get_payment_status(user_id,order_id):
+#     # get the payment status by calling the payment service
+#     payment_calling = f"{PAYMENT_SERVICE_URL}/status/{user_id}/{order_id}"
+#     response = requests.post(payment_calling)
+#     if response.status_code == 404:
+#         return Response(f"Something went wrong with the order", status=404)
+#     paid = response.json()['paid']
+#     return paid
+
 @app.get('/find/<order_id>')
 def find_order(order_id):
     user_id_result = db.hget('user_id', f'order:{order_id}').decode('utf-8')
@@ -85,7 +94,6 @@ def find_order(order_id):
 
     # get the item ids and amounts from the order
     items = db.hgetall(f'order{order_id}')
-    print('!!!!!!!!!!!!!!!!!!!!!!!!!!!',items,flush=True)
     converted_items = {key.decode(): int(value) for key, value in items.items()}
     item_ids = list(converted_items.keys())
     item_ids = [int(id[5::]) for id in item_ids]
@@ -107,11 +115,19 @@ def find_order(order_id):
     # get the payment status by calling the payment service
     payment_calling = f"{PAYMENT_SERVICE_URL}/status/{user_id_result}/{order_id}"
     response = requests.post(payment_calling)
-    if response.status_code == 404:
+    print('response', response, flush =True  )
+    if response.status_code != 200:
         return Response(f"Something went wrong with the order", status=404)
     paid = response.json()['paid']
-    if paid == None:
-        paid = False
+    # if paid == None:
+    #     paid = False
+
+    # get the payment status asynchronously using a callback function
+    # paid = False
+    # async with aiohttp.ClientSession() as session:
+    #     payment_status = await get_payment_status(user_id_result, order_id)
+    #     if payment_status != False:
+    #         paid = payment_status
 
     print('1111111',type(user_id_result),flush=True)
     print('2222222',type(order_id),flush=True)
@@ -208,10 +224,31 @@ def checkout(order_id):
     if response.status_code == 404:
         return Response(f"Something went wrong with the order", status=404)
     paid = response.json()['paid']
-    if paid == True:
+    if paid == 'True':
         return Response(f"The order {order_id} is already paid!", status=400)
 
-    total_cost = find_order(order_id)["total_cost"]
+    # total_cost = find_order(order_id)
+
+    # get the item ids and amounts from the order
+    items = db.hgetall(f'order{order_id}')
+    converted_items = {key.decode(): int(value) for key, value in items.items()}
+    item_ids = list(converted_items.keys())
+    item_ids = [int(id[5::]) for id in item_ids]
+    amounts = list(converted_items.values())
+
+    item_prices = []
+    # get the price of the item by calling the stock service
+    for item_id in item_ids:
+        stock_calling = f"{STOCK_SERVICE_URL}/find/{str(item_id)}"
+        response = requests.get(stock_calling)
+        if response.status_code == 404:
+            return Response(f"The item {item_id} does not exist", status=404)
+
+        item_price = response.json()["price"]
+        item_prices.append(int(item_price))
+
+    total_cost = sum(a * p for a, p in zip(amounts, item_prices))
+
     # make the payment (call remove_credit)
     remove_credit_calling = f"{PAYMENT_SERVICE_URL}/pay/{user_id_result}/{str(order_id)}/{total_cost}"
     response = requests.post(remove_credit_calling)

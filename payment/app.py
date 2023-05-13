@@ -8,8 +8,11 @@ import redis
 from flask import Flask, Response
 
 gateway_url = os.environ['GATEWAY_URL']
-STOCK_SERVICE_URL = f"{gateway_url}/stock"
+# print('gateway_url', gateway_url, flush=True)
+# STOCK_SERVICE_URL = f"{gateway_url}/stock"
 ORDER_SERVICE_URL = f"{gateway_url}/orders"
+# print("ORDER_SERVICE_URL", ORDER_SERVICE_URL, flush=True )
+
 # STOCK_SERVICE_URL = "http://stock-service:5000"
 # PAYMENT_SERVICE_URL = "http://payment-service:5000"
 # ORDER_SERVICE_URL = "http://order-service:5000"
@@ -130,14 +133,21 @@ def remove_credit(user_id: str, order_id: str, amount: int):
 
     # to do: check if the order exists
     order_calling = f"{ORDER_SERVICE_URL}/find/{order_id}"
+    print("order_calling", order_calling, flush=True)
     response = requests.get(order_calling)
    
-    if response.status_code == 404:
+    if response.status_code != 200:
         return Response(f"The order {order_id} does not exist", status=404)
     # order_user_id = response.json()['order_id']
 #####################################################
     # todo :amount: call ['total_cost']
+    print('response', response.content,flush=True)
+
     total_cost = response.json()['total_cost']
+    print('total_cost', total_cost, flush=True)
+    # response_json = json.loads(response.json())
+    # print('reponse_json', response_json, flush=True)
+    # total_cost = response_json['total_cost']
     if credit < int(total_cost):
         return Response(f"User {user_id} does not have enough credit!", status= 403)
 
@@ -145,7 +155,7 @@ def remove_credit(user_id: str, order_id: str, amount: int):
     db.hincrby('credit', f'user:{user_id}', -int(amount))
 
     # change the status of the payment (paid or not)
-    db.hset('paid', f'order:{order_id}', True)
+    db.hset('paid', f'order:{order_id}', 1)
 
     response = Response(
         response=json.dumps({'done': True}),
@@ -197,28 +207,29 @@ def cancel_payment(user_id: str, order_id: str):
     response = requests.get(order_calling)
     if response.status_code == 404:
         return Response(f"The order {order_id} does not exist", status=404)
-    order_user_id = response.json()['order_id']
+    order_user_id = response.json()['user_id']
+    print('order_user_id', order_user_id, type(order_user_id), flush=True)
+    print('user_id',user_id, type(user_id), flush=True)
     total_cost = response.json()['total_cost']
 
     
     # check if response['paid'] is False
     paid_result = db.hget('paid', f'order:{order_id}')
-    if paid_result == False:
+    if paid_result == 0:
         return Response(f"Order {order_id} payment status is False!", status=403)
     
-    if user_id != order_user_id:
+    if int(user_id) != order_user_id:
         return Response(f"The user {user_id} did not create order {order_id}!", status=403)
 
     # add the amount of the payment back to the user's credit
     credit = db.hget('credit', f'user:{user_id}')
     # credit = int(user_result[0])
-    new_credit = credit + int(total_cost)
-    db.hset(f'user:{user_id}', 'credit', new_credit)
-
-    # delete the payment record from the DB
-    db.delete(f'order:{order_id}')
+    new_credit = int(credit) + int(total_cost)
+    db.hset('credit', f'user:{user_id}', new_credit)
+ 
     # change the payment status
-    db.hset('paid', f'order:{order_id}', False)
+
+    db.hset('paid', f'order:{order_id}', 0)
 
     response = Response(
         response=json.dumps({'done': True}),
@@ -268,16 +279,10 @@ def payment_status(user_id: str, order_id: str):
     #     mimetype='application/json'
     # )
 
-    # order_calling = f"{ORDER_SERVICE_URL}/find/{order_id}"
-    # response = requests.get(order_calling)
-    # if response.status_code == 404:
-    #     return Response(f"The order {order_id} does not exist", status=404)
-    # order_user_id = response.json()['order_id']
-    # db.hset('paid', f'order:{order_user_id}', False)
-
+ 
     paid = db.hget('paid', f'order:{order_id}')
     return Response(
-        response=json.dumps({'paid': paid}),
+        response=json.dumps({'paid': bool(int(paid))}),
         status=HTTPStatus.OK,
         mimetype='application/json'
     )
