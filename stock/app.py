@@ -97,10 +97,10 @@ def remove_stock(item_id: str, amount: int):
     if stock < int(amount):
         return Response(status=HTTPStatus.NOT_FOUND) 
     else:
-         db.hincrby('stock', f'item{item_id}', -int(amount))
+        db.hincrby('stock', f'item{item_id}', -int(amount))
         #  stock = int(db.hget(f'item:{item_id}', 'stock'))
         #  print('stock1', stock,  flush=True)
-         return Response(status=HTTPStatus.OK)
+        return Response(status=HTTPStatus.OK)
  
     
 # delete 
