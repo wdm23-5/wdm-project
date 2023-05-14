@@ -25,7 +25,7 @@ def subtract_stock(item_id: str, amount: int) -> int:
 ########################################################################################################################
 #   PAYMENT MICROSERVICE FUNCTIONS
 ########################################################################################################################
-def payment_pay(user_id: str, order_id: str, amount: float) -> int:
+def payment_pay(user_id: str, order_id: str, amount: int) -> int:
     return requests.post(f"{PAYMENT_URL}/payment/pay/{user_id}/{order_id}/{amount}").status_code
 
 
