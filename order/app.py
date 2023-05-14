@@ -1,21 +1,20 @@
 import atexit
-import json
 import os
+import time
 from http import HTTPStatus
-from datetime import datetime
+from typing import Dict, List
+
 import redis
 import requests
-from flask import Flask, Response, request, jsonify
-from typing import List
+from flask import Flask
 
+from common.debug import wdm_assert, wdm_assert_type, wdm_debug, wdm_debug_mask, wdm_print
+from common.response import http_200_response, http_400_response, http_404_response, jdumps, json_response, text_response
+from common.scripts import lua_hdecr_ge_0
 
 gateway_url = os.environ['GATEWAY_URL']
-STOCK_SERVICE_URL = f"{gateway_url}/stock"
-PAYMENT_SERVICE_URL = f"{gateway_url}/payment"
-print(gateway_url,flush=True)
 
-app = Flask("order-service")
-print("--------- oreder start", flush=True)
+app = Flask('order-service')
 
 db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
                               port=int(os.environ['REDIS_PORT']),
@@ -29,274 +28,188 @@ def close_db_connection():
 
 atexit.register(close_db_connection)
 
-class Order:
-    def __init__(self, order_id: int, user_id: int, items: List[int] = [], total_cost: int = 0, paid:bool = False):
-        self.order_id = order_id
-        self.user_id = user_id
-        self.items = items
-        self.total_cost = total_cost
-        self.paid = paid
-
-    def to_dict(self):
-        return {
-            "order_id": self.order_id,
-            "user_id": self.user_id,
-            "items": json.dumps(self.items),
-            "paid": json.dumps(self.paid),
-            "total_cost": self.total_cost
-        }
-
 
 @app.post('/create/<user_id>')
-def create_order(user_id):
-    # todo: check if the user exists
-    # check if the user exists
-
-    # Increment the order_id and save it to Redis.
-    order_id = db.incr('order_id')
-    new_order = {'order_id':order_id, 'user_id': user_id}
-    # new_order = Order(order_id, user_id)
-    # store to DB
-    db.hset('user_id', f'order:{order_id}', user_id)
-
-    # order_id = 0
-    response = Response(
-        response=json.dumps({'order_id': order_id}),
-        status=HTTPStatus.OK,
-        mimetype='application/json'
-    )
-    return response
+def create_order(user_id: str):
+    wdm_print(f'post orders/create/{user_id} at {time.time()}')
+    # todo: validate user_id
+    order_id = db.incr('order_id:counter')
+    order_id = str(order_id)
+    with db.pipeline() as pl:
+        # todo: use script
+        pl.hset('order_id:user_id', order_id, user_id)
+        pl.set(f'order_{order_id}:paid', 0)
+        pl.set(f'order_{order_id}:deleted', 0)
+        pl.execute()
+    # return http_500_response(wdm_debug_mask(jdumps({'user_id': user_id, 'order_id': order_id})))
+    return json_response({'order_id': order_id})
 
 
 @app.delete('/remove/<order_id>')
-def remove_order(order_id):
-    # todo: write the deleted status into paid
-    success:bool = bool(db.delete(f'order:{order_id}'))
-    if not success:
-        return Response(status=HTTPStatus.NOT_FOUND)
-
-    return Response(status=HTTPStatus.OK)
-
-# async def get_payment_status(user_id,order_id):
-#     # get the payment status by calling the payment service
-#     payment_calling = f"{PAYMENT_SERVICE_URL}/status/{user_id}/{order_id}"
-#     response = requests.post(payment_calling)
-#     if response.status_code == 404:
-#         return Response(f"Something went wrong with the order", status=404)
-#     paid = response.json()['paid']
-#     return paid
-
-@app.get('/find/<order_id>')
-def find_order(order_id):
-    user_id_result = db.hget('user_id', f'order:{order_id}').decode('utf-8')
-    if not user_id_result:
-        return Response(f"The order {order_id} does not exist", status=404)
-
-    # get the item ids and amounts from the order
-    items = db.hgetall(f'order{order_id}')
-    converted_items = {key.decode(): int(value) for key, value in items.items()}
-    item_ids = list(converted_items.keys())
-    item_ids = [int(id[5::]) for id in item_ids]
-    amounts = list(converted_items.values())
-
-    item_prices = []
-    # get the price of the item by calling the stock service
-    for item_id in item_ids:
-        stock_calling = f"{STOCK_SERVICE_URL}/find/{str(item_id)}"
-        response = requests.get(stock_calling)
-        if response.status_code == 404:
-            return Response(f"The item {item_id} does not exist", status=404)
-
-        item_price = response.json()["price"]
-        item_prices.append(int(item_price))
-
-    total_cost = sum(a * p for a, p in zip(amounts, item_prices))
-
-    # get the payment status by calling the payment service
-    payment_calling = f"{PAYMENT_SERVICE_URL}/status/{user_id_result}/{order_id}"
-    response = requests.post(payment_calling)
-    print('response', response, flush =True  )
-    if response.status_code != 200:
-        return Response(f"Something went wrong with the order", status=404)
-    paid = response.json()['paid']
-    # if paid == None:
-    #     paid = False
-
-    # get the payment status asynchronously using a callback function
-    # paid = False
-    # async with aiohttp.ClientSession() as session:
-    #     payment_status = await get_payment_status(user_id_result, order_id)
-    #     if payment_status != False:
-    #         paid = payment_status
-
-    print('1111111',type(user_id_result),flush=True)
-    print('2222222',type(order_id),flush=True)
-    print('paid',paid,flush=True)
+def remove_order(order_id: str):
+    wdm_print(f'delete orders/remove/{order_id} at {time.time()}')
+    # todo: validate order_id
+    # op: BitFieldOperation = db.bitfield('order_id:status')
+    # op.set('u2', f'#{order_id}', 0b11)
+    # rst = op.execute()
+    # prev_status: int = rst[0]
+    prev_status = db.set(f'order_{order_id}:deleted', 1, get=True)
+    if wdm_debug():
+        if prev_status is None:
+            # not exist
+            return http_400_response(jdumps({'order_id': order_id, 'prev_status': -1}))
+        else:
+            wdm_assert_type(prev_status, bytes)
+            prev_status = int(prev_status)
+            if prev_status != 0:
+                # already deleted
+                return http_400_response(jdumps({'order_id': order_id, 'prev_status': prev_status}))
+    return http_200_response()
 
 
-    order = {'order_id': str(order_id),
-             'paid': paid,
-             'items': converted_items,
-             'user_id': str(user_id_result),
-             'total_cost': total_cost}
-
-    return order
-    #
-    # # convert order details from bytes to string
-    # order_details_str = {k.decode('utf-8'): v.decode('utf-8') for k, v in order_result.items()}
-    #
-    # # create Order object from order details
-    # order = Order(**order_details_str)
-    #
-    # # create response
-    # response = Response(response=json.dumps({
-    #     "order_id": order.order_id,
-    #     "paid": order.paid,
-    #     "items": order.items,
-    #     "user_id": order.user_id,
-    #     "total_cost": order.total_cost
-    # }),
-    # status=HTTPStatus.OK,
-    # mimetype='application/json')
-    # return response
-
-
-# adds a given item in the order given
 @app.post('/addItem/<order_id>/<item_id>')
-def add_item(order_id, item_id):
-    # check if the order exists
-    # if not db.hexists('user_id', f'order:{order_id}'):
-    #     return Response(f"The order {order_id} does not exist", status=404)
-
-    user_id_result = db.hget('user_id', f'order:{order_id}')
-    if not user_id_result:
-        return Response(f"The order {order_id} does not exist", status=404)
-    # item = {'order_id':order_id, 'item_id': item_id}
-
-    db.hincrby(f'order{order_id}', f'item:{item_id}', 1)
-    return Response(f"The item {item_id} is added to order {order_id}", status=200)
+def add_item(order_id: str, item_id: str):
+    wdm_print(f'post orders/addItem/{order_id}/{item_id} at {time.time()}')
+    # todo: validate order_id, item_id
+    amount = db.hincrby(f'order_{order_id}:item_id:amount', item_id, 1)
+    return http_200_response(wdm_debug_mask(jdumps({'order_id': order_id, 'item_id': item_id, 'amount': amount})))
 
 
-# removes the given item from the given order
+hdecr_ge_0 = db.register_script(lua_hdecr_ge_0)
+
+
 @app.delete('/removeItem/<order_id>/<item_id>')
-def remove_item(order_id, item_id):
-    user_id_result = db.hget('user_id', f'order:{order_id}')
-    if not user_id_result:
-        return Response(f"The order {order_id} does not exist", status=404)
+def remove_item(order_id: str, item_id: str):
+    wdm_print(f'delete orders/addItem/{order_id}/{item_id} at {time.time()}')
+    # todo: validate order_id, item_id
+    amount = hdecr_ge_0(keys=[f'order_{order_id}:item_id:amount'], args=[item_id])
+    wdm_assert_type(amount, int)
+    return http_200_response(wdm_debug_mask(jdumps({'order_id': order_id, 'item_id': item_id, 'amount': amount})))
 
 
-    # check if the items you want to delete is actually in the order
-    items_in_order = db.hkeys(f'order{order_id}')
-    items_in_order = [item.decode() for item in items_in_order]
-    print('items_in_order', items_in_order, flush=True)
-    if f'item:{item_id}' not in items_in_order:
-        return Response(f"The order {order_id} does not have item {item_id}!", status=404)
+# todo: multiple calls may return different number of items / cost.
+#  require another api for consistent results for paid orders,
+#  i.e. lazy evaluation & load from cache.
+@app.get('/find/<order_id>')
+def find_order(order_id: str):
+    wdm_print(f'get orders/find/{order_id} at {time.time()}')
+    # todo: validate order_id
 
-    db.hincrby(f'order{order_id}', f'item:{item_id}', -1)
-    return Response(f"The item {item_id} is added to order {order_id}", status=200)
+    paid = db.get(f'order_{order_id}:paid')
+    if paid is None:
+        return http_404_response(wdm_debug_mask(f'order_{order_id}:paid nx'))
+    wdm_assert_type(paid, bytes)
+    paid = bool(int(paid))
+    # todo: branch if already paid
+
+    return _do_find_order(order_id, paid)
 
 
+def _do_find_order(order_id: str, paid: bool):
+    # todo: can be parallel
+
+    user_id = db.hget('order_id:user_id', order_id)
+    if user_id is None:
+        return http_404_response(wdm_debug_mask(f'order_id:user_id {order_id} nx'))
+    wdm_assert_type(user_id, bytes)
+    user_id = user_id.decode('utf-8')
+
+    item_amount = db.hgetall(f'order_{order_id}:item_id:amount')
+    items: List[str] = []
+    amounts: List[int] = []
+    for k, v in item_amount.items():
+        v = int(v)
+        if v > 0:
+            k = k.decode('utf-8')
+            items.append(k)
+            amounts.append(v)
+
+    prices: List[int] = []
+    stocks: List[int] = []
+    for idx, item_id in enumerate(items):
+        # todo: async / para
+        resp = requests.get(f'{gateway_url}/stock/find/{item_id}')
+        if resp.status_code != HTTPStatus.OK:
+            return http_404_response(wdm_debug_mask(f'order_{order_id}:item_id:amount /stock/find/{item_id} nx'))
+        jresp = resp.json()
+        price = jresp['price']
+        stock = jresp['stock']
+        wdm_assert_type(price, int)
+        wdm_assert_type(stock, int)
+        prices.append(price)
+        stocks.append(stock)
+
+    # clamp amount
+    # todo: no need to clamp. abort directly
+    wdm_assert(len(amounts) == len(items) and len(prices) == len(items) and len(stocks) == len(items))
+    item_ids: List[str] = []
+    total_cost: int = 0
+    for item_id, amount, price, stock in zip(items, amounts, prices, stocks):
+        amount = min(stock, amount)
+        item_ids.extend([item_id] * amount)
+        total_cost += price * amount
+
+    return json_response({
+        'order_id': order_id,
+        'paid': paid,
+        'items': item_ids,
+        'user_id': user_id,
+        'total_cost': total_cost
+    })
 
 
-# make the payment (via calling the payment service),
-# subtract the stock (via the stock service) and returns a status (success/failure).
+# todo: error if called concurrently
 @app.post('/checkout/<order_id>')
-def checkout(order_id):
-    # check if the order exists
-    user_id_result = db.hget('user_id', f'order:{order_id}').decode('utf-8')
-    if not user_id_result:
-        return Response(f"The order {order_id} does not exist", status=404)
+def checkout(order_id: str):
+    wdm_print(f'post orders/checkout/{order_id} at {time.time()}')
+    # todo: validate order_id
 
-    # get the item ids and amounts from the order
-    items = db.hgetall(f'order{order_id}')
-    converted_items = {key.decode(): int(value) for key, value in items.items()}
-    item_ids = list(converted_items.keys())
-    item_ids = [int(id[5::]) for id in item_ids]
-    amounts = list(converted_items.values())
+    # todo: lock
 
-    # check if the order has more than 1 item
-    if sum(amounts) == 0:
-        return Response(f"The order {order_id} is empty!", status=400)
+    deleted = db.get(f'order_{order_id}:deleted')
+    if deleted is None:
+        return http_404_response(wdm_debug_mask(f'order_{order_id}:deleted nx'))
+    wdm_assert_type(deleted, bytes)
+    deleted = bool(int(deleted))
+    if deleted:
+        return http_400_response(wdm_debug_mask(f'order_{order_id}:deleted == 1'))
 
-    # check if the order has already been paid (call payment status)
-    payment_calling = f"{PAYMENT_SERVICE_URL}/status/{user_id_result}/{order_id}"
-    response = requests.post(payment_calling)
-    if response.status_code == 404:
-        return Response(f"Something went wrong with the order", status=404)
-    paid = response.json()['paid']
-    if paid == 'True':
-        return Response(f"The order {order_id} is already paid!", status=400)
+    paid = db.get(f'order_{order_id}:paid')
+    if paid is None:
+        return http_404_response(wdm_debug_mask(f'order_{order_id}:paid nx'))
+    wdm_assert_type(paid, bytes)
+    paid = bool(int(paid))
+    if paid:
+        return http_400_response(wdm_debug_mask(f'order_{order_id}:paid == 1'))
 
-    # total_cost = find_order(order_id)
+    resp = _do_find_order(order_id, paid)
+    if resp.status_code != HTTPStatus.OK:
+        return resp
+    order_j = resp.json
+    wdm_assert_type(order_j, dict)
 
-    item_prices = []
-    # get the price of the item by calling the stock service
-    for item_id in item_ids:
-        stock_calling = f"{STOCK_SERVICE_URL}/find/{str(item_id)}"
-        response = requests.get(stock_calling)
-        if response.status_code == 404:
-            return Response(f"The item {item_id} does not exist", status=404)
+    # todo: 2pc / occ
 
-        item_price = response.json()["price"]
-        item_prices.append(int(item_price))
+    resp = requests.post(f'{gateway_url}/payment/pay/{order_j["user_id"]}/{order_id}/{order_j["total_cost"]}')
+    if resp.status_code != HTTPStatus.OK:
+        # do not directly return the response from post
+        return text_response(resp.text, resp.status_code)
 
-    total_cost = sum(a * p for a, p in zip(amounts, item_prices))
+    item_amount: Dict[str, int] = dict()
+    for item_id in order_j['items']:
+        item_amount[item_id] = item_amount.get(item_id, 0) + 1
+    for item_id, amount in item_amount.items():
+        resp = requests.post(f'{gateway_url}/stock/subtract/{item_id}/{amount}')
+        if resp.status_code != HTTPStatus.OK:
+            return text_response(resp.text, resp.status_code)
 
-    # make the payment (call remove_credit)
-    remove_credit_calling = f"{PAYMENT_SERVICE_URL}/pay/{user_id_result}/{str(order_id)}/{total_cost}"
-    response = requests.post(remove_credit_calling)
-    if response.status_code != 200:
-        return Response(f"Something went wrong with the payment...", status=response.status_code)
+    db.set(f'order_{order_id}:paid', 1)
 
-    # subtract the stock(call remove_stock)
-    for i in range(len(item_ids)):
-        stock_calling = f"{STOCK_SERVICE_URL}/subtract/{str(item_ids[i])}/{amounts[i]}"
-        response = requests.post(stock_calling)
-        if response.status_code != 200:
-            return Response(f"Something went wrong with the stock...", status=response.status_code)
-
-    return Response(f"Order {order_id} is paid successfully", status=200)
-    # # update the payment status
-    # db.hset(f'order:{order_id}', 'paid', True)
+    return http_200_response()
 
 
-
-    # order_result = db.hgetall(f'order:{order_id}')
-    # # convert order details from bytes to string
-    # order_details_str = {k.decode('utf-8'): v.decode('utf-8') for k, v in order_result.items()}
-    # # create Order object from order details
-    # order = Order(**order_details_str)
-    # order.order_id = int(order.order_id)
-    # order.user_id = int(order.user_id)
-    # order.total_cost = int(order.total_cost)
-    # order.paid = bool(order.paid)
-    # # order.items = json.loads(order.items)
-    #
-    # # check if the order has more than 1 item
-    # if not order.items:
-    #     return Response(f"The order {order_id} is empty!", status=400)
-    #
-    # # check if the order is paid
-    # if order.paid == True:
-    #     return Response(f"The order {order_id} is already paid!", status=400)
-    #
-    # # make the payment (via calling the payment service)
-    # payment_calling = f"{PAYMENT_SERVICE_URL}/pay/{order.user_id}/{order_id}/{order.total_cost}"
-    # response = requests.post(payment_calling)
-    # if response.status_code != 200:
-    #     return Response(f"Something went wrong with the payment...", status=response.status_code)
-    #
-    # # subtract the stock (via the stock service)
-    # for item_id in order.items:
-    #     stock_calling = f"{STOCK_SERVICE_URL}/subtract/{item_id}/1"
-    #     response = requests.post(stock_calling)
-    #     if response.status_code != 200:
-    #         return Response(f"Something went wrong with the stock...", status=response.status_code)
-    #
-    
-    # # update the payment status
-    # db.hset(f'order:{order_id}', 'paid', True)
-
-@app.get('/deletedb')
-def delete_db():
-    db.flushall()
+if wdm_debug():
+    @app.post('/drop-database')
+    def drop_database():
+        db.flushdb()
+        return http_200_response()

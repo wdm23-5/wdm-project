@@ -69,7 +69,6 @@ class TestMicroservices(unittest.TestCase):
         self.assertTrue(tu.status_code_is_success(add_item_response))
 
         payment_response = tu.payment_pay(user_id, order_id, 10)
-        print(payment_response)
         self.assertTrue(tu.status_code_is_success(payment_response))
 
         credit_after_payment: int = tu.find_user(user_id)['credit']
