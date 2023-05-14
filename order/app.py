@@ -134,10 +134,10 @@ def find_order(order_id):
     print('paid',paid,flush=True)
 
 
-    order = {'order_id': order_id,
+    order = {'order_id': str(order_id),
              'paid': paid,
              'items': converted_items,
-             'user_id': int(user_id_result),
+             'user_id': str(user_id_result),
              'total_cost': total_cost}
 
     return order
@@ -229,13 +229,6 @@ def checkout(order_id):
 
     # total_cost = find_order(order_id)
 
-    # get the item ids and amounts from the order
-    items = db.hgetall(f'order{order_id}')
-    converted_items = {key.decode(): int(value) for key, value in items.items()}
-    item_ids = list(converted_items.keys())
-    item_ids = [int(id[5::]) for id in item_ids]
-    amounts = list(converted_items.values())
-
     item_prices = []
     # get the price of the item by calling the stock service
     for item_id in item_ids:
@@ -262,6 +255,7 @@ def checkout(order_id):
         if response.status_code != 200:
             return Response(f"Something went wrong with the stock...", status=response.status_code)
 
+    return Response(f"Order {order_id} is paid successfully", status=200)
     # # update the payment status
     # db.hset(f'order:{order_id}', 'paid', True)
 
@@ -302,8 +296,6 @@ def checkout(order_id):
     
     # # update the payment status
     # db.hset(f'order:{order_id}', 'paid', True)
-
-    return Response(f"Order {order_id} is paid successfully", status=200)
 
 @app.get('/deletedb')
 def delete_db():

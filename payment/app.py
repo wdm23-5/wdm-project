@@ -98,28 +98,6 @@ def add_credit(user_id: str, amount: int):
 # (returns failure if credit is not enough)
 @app.post('/pay/<user_id>/<order_id>/<amount>')
 def remove_credit(user_id: str, order_id: str, amount: int):
-    # # todo: call /find/<order_id>
-    # success = True
-    # if not success:
-    #     return Response(status=HTTPStatus.BAD_REQUEST)
-    # response = dict()
-    #
-    # if response['paid'] is True or response['user_id'] != user_id:
-    #     return Response(status=HTTPStatus.BAD_REQUEST)
-    #
-    # # todo: select (user_id, credit)
-    # success = True
-    # if not success:
-    #     return Response(status=HTTPStatus.BAD_REQUEST)
-    # credit = 0
-    #
-    # # todo: atomic dec credit
-    # #   cas credit
-    # # return Response(status=HTTPStatus.BAD_REQUEST)
-    #
-    # return Response(status=HTTPStatus.OK)
-
-
     # check if the user exists
     user_exists = db.hexists('credit', f'user:{user_id}')
     if not user_exists:
@@ -127,28 +105,20 @@ def remove_credit(user_id: str, order_id: str, amount: int):
 
     # check if the user has enough credit
     credit = db.hget('credit', f'user:{user_id}')
-    if credit is None: 
+    if credit is None:
             raise NotImplementedError
     credit = int(credit)
 
     # to do: check if the order exists
     order_calling = f"{ORDER_SERVICE_URL}/find/{order_id}"
-    print("order_calling", order_calling, flush=True)
     response = requests.get(order_calling)
-   
     if response.status_code != 200:
         return Response(f"The order {order_id} does not exist", status=404)
-    # order_user_id = response.json()['order_id']
-#####################################################
-    # todo :amount: call ['total_cost']
-    print('response', response.content,flush=True)
 
-    total_cost = response.json()['total_cost']
-    print('total_cost', total_cost, flush=True)
-    # response_json = json.loads(response.json())
-    # print('reponse_json', response_json, flush=True)
-    # total_cost = response_json['total_cost']
-    if credit < int(total_cost):
+    if response.json()['paid'] == True or response.json()['user_id'] != user_id:
+        return Response(f'????????',status=HTTPStatus.BAD_REQUEST)
+
+    if credit < int(amount):
         return Response(f"User {user_id} does not have enough credit!", status= 403)
 
     # subtracts the amount of the order from the user’s credit
@@ -162,6 +132,7 @@ def remove_credit(user_id: str, order_id: str, amount: int):
         status=HTTPStatus.OK,
         mimetype='application/json'
     )
+    print('credit',credit,flush=True)
     return response
 
 
@@ -282,7 +253,7 @@ def payment_status(user_id: str, order_id: str):
  
     paid = db.hget('paid', f'order:{order_id}')
     return Response(
-        response=json.dumps({'paid': bool(int(paid))}),
+        response=json.dumps({'paid': bool(int(paid or 0))}),
         status=HTTPStatus.OK,
         mimetype='application/json'
     )
