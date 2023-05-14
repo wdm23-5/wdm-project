@@ -9,7 +9,9 @@ services:
       - "8000:80"
 
   order-service:
-    build: ./order
+    build:
+      context: .
+      dockerfile: ./order/Dockerfile
     image: order:latest
     environment:
       - GATEWAY_URL=http://gateway:80
@@ -22,7 +24,9 @@ services:
     command: redis-server --requirepass redis --maxmemory 512mb
 
   stock-service:
-    build: ./stock
+    build:
+      context: .
+      dockerfile: ./stock/Dockerfile
     image: stock:latest
     command: gunicorn -b 0.0.0.0:5000 app:app -w 1 --timeout 10
     env_file:
@@ -33,7 +37,9 @@ services:
     command: redis-server --requirepass redis --maxmemory 512mb
 
   payment-service:
-    build: ./payment
+    build:
+      context: .
+      dockerfile: ./payment/Dockerfile
     image: user:latest
     command: gunicorn -b 0.0.0.0:5000 app:app -w 1 --timeout 10
     env_file:
