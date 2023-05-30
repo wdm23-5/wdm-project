@@ -1,13 +1,12 @@
-FROM python:3.11-slim
+FROM golang:1.19
 
-WORKDIR /home/flask-app
+WORKDIR /home/order-service
 
-COPY ./order/requirements.txt .
+COPY common common
+COPY main/order.go main/order.go
+COPY order order
+COPY go.mod go.sum ./
 
-RUN pip install -r requirements.txt
-
-COPY ./order .
-
-COPY ./common ./common
+RUN go build -v -o order-app main/order.go
 
 EXPOSE 5000

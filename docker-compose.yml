@@ -10,12 +10,12 @@ services:
 
   order-service:
     build:
-      context: .
-      dockerfile: ./order/Dockerfile
+      context: ./src
+      dockerfile: ./src/order/Dockerfile
     image: order:latest
     environment:
       - GATEWAY_URL=http://gateway:80
-    command: gunicorn -b 0.0.0.0:5000 app:app -w 1 --timeout 10
+    command: ./order-app
     env_file:
       - env/order_redis.env
 
@@ -25,10 +25,10 @@ services:
 
   stock-service:
     build:
-      context: .
-      dockerfile: ./stock/Dockerfile
+      context: ./src
+      dockerfile: ./src/stock/Dockerfile
     image: stock:latest
-    command: gunicorn -b 0.0.0.0:5000 app:app -w 1 --timeout 10
+    command: ./stock-app
     env_file:
       - env/stock_redis.env
 
@@ -38,10 +38,10 @@ services:
 
   payment-service:
     build:
-      context: .
-      dockerfile: ./payment/Dockerfile
+      context: ./src
+      dockerfile: ./src/payment/Dockerfile
     image: user:latest
-    command: gunicorn -b 0.0.0.0:5000 app:app -w 1 --timeout 10
+    command: ./payment-app
     env_file:
       - env/payment_redis.env
 

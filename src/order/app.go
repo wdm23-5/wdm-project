@@ -14,7 +14,7 @@ var rdb *redis.Client
 var rHDecrIfGe0XX *redis.Script
 var rTryLockOrderXX *redis.Script
 
-func main() {
+func Main() {
 	gatewayUrl = common.MustGetEnv("GATEWAY_URL")
 
 	snowGen = common.NewSnowFlakeGenerator(common.MustGetEnv("MACHINE_ID"))
@@ -25,21 +25,17 @@ func main() {
 		DB:       common.MustS2I(common.MustGetEnv("REDIS_DB")),
 	})
 	rHDecrIfGe0XX = redis.NewScript(common.LuaHDecrIfGe0XX)
-	rTryLockOrderXX = redis.NewScript(luaTryLockOrderXX)
 
 	router := gin.New()
 	common.DEffect(func() {
 		router.Use(gin.Logger())
 	})
 
-	router.POST("/create/:user_id", createOrder)
-	router.DELETE("/remove/:order_id", removeOrder)
-	router.POST("/addItem/:order_id/:item_id", addItem)
-	router.DELETE("/removeItem/:order_id/:item_id", removeItem)
-	router.GET("/find/:order_id", findOrder)
-	router.POST("/checkout/:order_id", checkoutOrder)
-
 	common.DEffect(func() {
+		router.GET("/ping", func(ctx *gin.Context) {
+			ctx.String(http.StatusOK, common.NowString()+" order "+snowGen.Next().String())
+		})
+
 		router.DELETE("/drop-database", func(ctx *gin.Context) {
 			rdb.FlushDB(ctx)
 			ctx.Status(http.StatusOK)

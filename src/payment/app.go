@@ -30,7 +30,7 @@ func Main() {
 
 	common.DEffect(func() {
 		router.GET("/ping", func(ctx *gin.Context) {
-			ctx.String(http.StatusOK, common.NowString()+" payment")
+			ctx.String(http.StatusOK, common.NowString()+" payment "+snowGen.Next().String())
 		})
 
 		router.DELETE("/drop-database", func(ctx *gin.Context) {

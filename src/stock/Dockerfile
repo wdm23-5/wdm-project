@@ -1,13 +1,12 @@
-FROM python:3.11-slim
+FROM golang:1.19
 
-WORKDIR /home/flask-app
+WORKDIR /home/stock-service
 
-COPY ./stock/requirements.txt .
+COPY common common
+COPY main/stock.go main/stock.go
+COPY stock stock
+COPY go.mod go.sum ./
 
-RUN pip install -r requirements.txt
-
-COPY ./stock .
-
-COPY ./common ./common
+RUN go build -v -o stock-app main/stock.go
 
 EXPOSE 5000

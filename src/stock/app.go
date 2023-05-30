@@ -13,7 +13,7 @@ var snowGen *common.SnowflakeGenerator
 var rdb *redis.Client
 var rIncrbyIfGe0XX *redis.Script
 
-func main() {
+func Main() {
 	gatewayUrl = common.MustGetEnv("GATEWAY_URL")
 
 	snowGen = common.NewSnowFlakeGenerator(common.MustGetEnv("MACHINE_ID"))
@@ -30,16 +30,11 @@ func main() {
 		router.Use(gin.Logger())
 	})
 
-	router.POST("/item/create/:price", createItem)
-	router.GET("/find/:item_id", findItem)
-	router.POST("/add/:item_id/:amount", addStock)
-	router.POST("/subtract/:item_id/:amount", removeStock)
-
-	router.POST("/tx/prepare/:tx_id", prepareTx)
-	router.POST("/tx/commit/:tx_id", commitTx)
-	router.POST("/tx/abort/:tx_id", abortTx)
-
 	common.DEffect(func() {
+		router.GET("/ping", func(ctx *gin.Context) {
+			ctx.String(http.StatusOK, common.NowString()+" stock "+snowGen.Next().String())
+		})
+
 		router.DELETE("/drop-database", func(ctx *gin.Context) {
 			rdb.FlushDB(ctx)
 			ctx.Status(http.StatusOK)
