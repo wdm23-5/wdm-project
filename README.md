@@ -1,3 +1,8 @@
+**Deprecated**
+
+This repo is archived due to broken git log. The code is now in [wdm-project-go](https://github.com/wdm23-5/wdm-project-go).
+
+
 # Web-scale Data Management Project Template
 
 Basic project structure with Python's Flask and Redis. 
